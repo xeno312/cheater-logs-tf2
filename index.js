@@ -1,4 +1,3 @@
-require('dotenv').config();
 const {
   Client,
   IntentsBitField,
@@ -16,7 +15,6 @@ const {
 } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
-const validator = require('validator');
 
 // Initialize Discord client
 const client = new Client({
@@ -24,7 +22,6 @@ const client = new Client({
     IntentsBitField.Flags.Guilds,
     IntentsBitField.Flags.GuildMessages,
     IntentsBitField.Flags.MessageContent,
-    IntentsBitField.Flags.GuildChannels,
   ],
 });
 
@@ -45,7 +42,7 @@ function loadData(file, defaultData) {
       return Array.isArray(data) || typeof data === 'object' ? data : defaultData;
     }
   } catch (error) {
-    console.error(`ข้อผิดพลาดในการโหลด ${file}:`, error.message);
+    console.error(`ข้อผิดพลาดในการโหลด ${file}:`, error);
   }
   fs.writeFileSync(file, JSON.stringify(defaultData, null, 2));
   return defaultData;
@@ -59,7 +56,7 @@ function saveData(file, data) {
   try {
     fs.writeFileSync(file, JSON.stringify(data, null, 2));
   } catch (error) {
-    console.error(`ข้อผิดพลาดในการบันทึก ${file}:`, error.message);
+    console.error(`ข้อผิดพลาดในการบันทึก ${file}:`, error);
   }
 }
 function saveCheaters() {
@@ -78,110 +75,36 @@ function logAction(action, details, user) {
     logs.push({
       action,
       details,
-      user: { tag: user.tag, id: user.id },
+      user: user.tag,
       timestamp: new Date().toISOString(),
     });
     saveLogs();
   } catch (error) {
-    console.error('ข้อผิดพลาดในการบันทึก log:', error.message);
+    console.error('ข้อผิดพลาดในการบันทึก log:', error);
   }
 }
 
 // Send message to cheater channel
-async function sendToCheaterChannel(embed, components = [], interaction = null) {
-  if (!config.cheaterChannelId) {
-    if (interaction) {
-      await interaction.reply({
-        content: 'ยังไม่ได้ตั้งค่าช่องสำหรับจัดการผู้โกง! ใช้คำสั่ง /setup เพื่อสร้างช่อง',
-        flags: MessageFlags.Ephemeral,
-      });
-    }
-    return null;
-  }
+async function sendToCheaterChannel(embed, components = []) {
+  if (!config.cheaterChannelId) return null;
   try {
     const channel = await client.channels.fetch(config.cheaterChannelId);
-    if (!channel || !channel.isTextBased()) {
-      config.cheaterChannelId = null;
-      saveConfig();
-      if (interaction) {
-        await interaction.reply({
-          content: 'ช่อง tf2-cheater-logs ถูกลบหรือไม่สามารถใช้งานได้! กรุณาใช้ /setup เพื่อตั้งค่าใหม่',
-          flags: MessageFlags.Ephemeral,
-        });
-      }
-      return null;
+    if (
+      channel &&
+      channel.isTextBased() &&
+      channel.permissionsFor(client.user).has(PermissionsBitField.Flags.SendMessages)
+    ) {
+      return await channel.send({ embeds: [embed], components });
     }
-    if (!channel.permissionsFor(client.user).has([PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.EmbedLinks])) {
-      if (interaction) {
-        await interaction.reply({
-          content: 'บอทไม่มีสิทธิ์ส่งข้อความในช่อง tf2-cheater-logs! กรุณาตรวจสอบสิทธิ์',
-          flags: MessageFlags.Ephemeral,
-        });
-      }
-      return null;
-    }
-    return await channel.send({ embeds: [embed], components });
   } catch (error) {
     console.error('ข้อผิดพลาดในการส่งข้อความถึงช่องผู้โกง:', error.message);
-    if (interaction) {
-      await interaction.reply({
-        content: 'เกิดข้อผิดพลาดในการส่งข้อความไปยังช่อง tf2-cheater-logs! กรุณาลองใหม่',
-        flags: MessageFlags.Ephemeral,
-      });
-    }
-    return null;
   }
+  return null;
 }
 
-// Validate inputs
+// Validate SteamID64
 function isValidSteamID(steamID) {
   return /^\d{17}$/.test(steamID.trim());
-}
-function isValidEvidence(evidence) {
-  return evidence === 'ไม่มี' || validator.isURL(evidence, { require_protocol: true });
-}
-
-// Create welcome embed
-function createWelcomeEmbed() {
-  return new EmbedBuilder()
-    .setColor('#32CD32')
-    .setTitle('⚙ ยินดีต้อนรับสู่ระบบจัดการผู้โกง TF2!')
-    .setDescription(
-      'ใช้ปุ่มด้านล่างเพื่อจัดการผู้โกง:\n' +
-      '🔥 **เพิ่มผู้โกง**: กรอก SteamID64, เหตุผล, และหลักฐาน (เช่น ลิงก์ YouTube)\n' +
-      '📜 **ดูรายชื่อผู้โกง**: ดูรายชื่อผู้โกงทั้งหมด\n' +
-      '🗑️ **ลบผู้โกง**: ลบผู้โกงออกจากรายชื่อ (แอดมินเท่านั้น)\n' +
-      '✏️ **แก้ไขผู้โกง**: แก้ไขข้อมูลผู้โกง (แอดมินเท่านั้น)'
-    )
-    .setThumbnail('https://wiki.teamfortress.com/w/images/thumb/4/4a/Team_Fortress_2_Logo.png/250px-Team_Fortress_2_Logo.png')
-    .setFooter({ text: 'TF2 Anti-Cheater Bot', iconURL: client.user.displayAvatarURL() })
-    .setTimestamp();
-}
-
-// Create button row
-function createButtonRow() {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId('add_cheater')
-      .setLabel('เพิ่มผู้โกง')
-      .setStyle(ButtonStyle.Success)
-      .setEmoji('🔥'),
-    new ButtonBuilder()
-      .setCustomId('list_cheaters')
-      .setLabel('ดูรายชื่อผู้โกง')
-      .setStyle(ButtonStyle.Primary)
-      .setEmoji('📜'),
-    new ButtonBuilder()
-      .setCustomId('remove_cheater')
-      .setLabel('ลบผู้โกง')
-      .setStyle(ButtonStyle.Danger)
-      .setEmoji('🗑️'),
-    new ButtonBuilder()
-      .setCustomId('edit_cheater')
-      .setLabel('แก้ไขผู้โกง')
-      .setStyle(ButtonStyle.Secondary)
-      .setEmoji('✏️')
-  );
 }
 
 // Bot ready event
@@ -206,23 +129,7 @@ client.on('ready', async () => {
     await client.application.commands.set(commands);
     console.log('ลงทะเบียนคำสั่ง Slash เสร็จสิ้น!');
   } catch (error) {
-    console.error('เกิดข้อผิดพลาดในการลงทะเบียนคำสั่ง:', error.message);
-  }
-
-  // Check if cheater channel exists
-  if (config.cheaterChannelId) {
-    try {
-      const channel = await client.channels.fetch(config.cheaterChannelId);
-      if (!channel || !channel.isTextBased()) {
-        config.cheaterChannelId = null;
-        saveConfig();
-        console.log('ช่อง tf2-cheater-logs ถูกลบหรือไม่สามารถใช้งานได้ ตั้งค่าใหม่เป็น null');
-      }
-    } catch (error) {
-      config.cheaterChannelId = null;
-      saveConfig();
-      console.error('ข้อผิดพลาดในการตรวจสอบช่อง:', error.message);
-    }
+    console.error('เกิดข้อผิดพลาดในการลงทะเบียนคำสั่ง:', error);
   }
 });
 
@@ -244,6 +151,7 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isCommand()) {
     const { commandName, options, member, user } = interaction;
 
+    // /setup
     if (commandName === 'setup') {
       if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) {
         return interaction.reply({
@@ -278,11 +186,7 @@ client.on('interactionCreate', async (interaction) => {
             },
             {
               id: client.user.id,
-              allow: [
-                PermissionsBitField.Flags.SendMessages,
-                PermissionsBitField.Flags.EmbedLinks,
-                PermissionsBitField.Flags.ViewChannel,
-              ],
+              allow: [PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ViewChannel],
             },
             {
               id: member.id,
@@ -293,7 +197,7 @@ client.on('interactionCreate', async (interaction) => {
         config.cheaterChannelId = channel.id;
         updates.push(`สร้างช่องสำหรับจัดการผู้โกง: ${channel}`);
       } catch (error) {
-        console.error('ข้อผิดพลาดในการสร้างช่อง:', error.message);
+        console.error('ข้อผิดพลาดในการสร้างช่อง:', error);
         return interaction.reply({
           content: 'เกิดข้อผิดพลาดในการสร้างช่อง! กรุณาลองใหม่',
           flags: MessageFlags.Ephemeral,
@@ -306,11 +210,46 @@ client.on('interactionCreate', async (interaction) => {
       saveConfig();
       logAction('ตั้งค่าระบบ', { updates }, user);
 
-      // Send welcome embed
-      const welcomeEmbed = createWelcomeEmbed();
-      const buttonRow = createButtonRow();
+      // Send welcome embed with command buttons
+      const welcomeEmbed = new EmbedBuilder()
+        .setColor('#32CD32')
+        .setTitle('⚙ ยินดีต้อนรับสู่ระบบจัดการผู้โกง TF2!')
+        .setDescription(
+          'ใช้ปุ่มด้านล่างเพื่อจัดการผู้โกง:\n' +
+          '🔥 **เพิ่มผู้โกง**: กรอก SteamID64, เหตุผล, และหลักฐาน\n' +
+          '📜 **ดูรายชื่อผู้โกง**: ดูรายชื่อผู้โกงทั้งหมด\n' +
+          '🗑 **ลบผู้โกง**: ลบผู้โกงออกจากรายชื่อ (แอดมินเท่านั้น)\n' +
+          '✏️ **แก้ไขผู้โกง**: แก้ไขข้อมูลผู้โกง (แอดมินเท่านั้น)'
+        )
+        .setThumbnail('https://wiki.teamfortress.com/w/images/thumb/4/4a/Team_Fortress_2_Logo.png/250px-Team_Fortress_2_Logo.png')
+        .setFooter({ text: 'TF2 Anti-Cheater Bot', iconURL: client.user.displayAvatarURL() })
+        .setTimestamp();
+
+      const buttonRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('add_cheater')
+          .setLabel('เพิ่มผู้โกง')
+          .setStyle(ButtonStyle.Success)
+          .setEmoji('🔥'),
+        new ButtonBuilder()
+          .setCustomId('list_cheaters')
+          .setLabel('ดูรายชื่อผู้โกง')
+          .setStyle(ButtonStyle.Primary)
+          .setEmoji('📜'),
+        new ButtonBuilder()
+          .setCustomId('remove_cheater')
+          .setLabel('ลบผู้โกง')
+          .setStyle(ButtonStyle.Danger)
+          .setEmoji('🗑️'),
+        new ButtonBuilder()
+          .setCustomId('edit_cheater')
+          .setLabel('แก้ไขผู้โกง')
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji('✏️')
+      );
+
       await interaction.reply({ embeds: [welcomeEmbed], flags: MessageFlags.Ephemeral });
-      await sendToCheaterChannel(welcomeEmbed, [buttonRow], interaction);
+      await sendToCheaterChannel(welcomeEmbed, [buttonRow]);
     }
   }
 
@@ -323,7 +262,7 @@ client.on('interactionCreate', async (interaction) => {
 
     const { customId, user, member } = interaction;
 
-    // Add cheater
+    // Add cheater button
     if (customId === 'add_cheater') {
       if (!config.addCheaterEveryone && !member.permissions.has(PermissionsBitField.Flags.Administrator)) {
         return interaction.reply({
@@ -340,21 +279,18 @@ client.on('interactionCreate', async (interaction) => {
         .setCustomId('steamid')
         .setLabel('SteamID64 (17 หลัก)')
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder('เช่น 76561198000012345')
         .setRequired(true);
 
       const reasonInput = new TextInputBuilder()
         .setCustomId('reason')
         .setLabel('เหตุผลที่เพิ่มผู้โกง')
         .setStyle(TextInputStyle.Paragraph)
-        .setPlaceholder('เช่น ใช้ Aimbot ในเกม')
         .setRequired(true);
 
       const evidenceInput = new TextInputBuilder()
         .setCustomId('evidence')
         .setLabel('ลิงก์หลักฐาน (ถ้ามี)')
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder('เช่น https://youtube.com/watch?v=xxx')
         .setRequired(false);
 
       modal.addComponents(
@@ -366,7 +302,7 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.showModal(modal);
     }
 
-    // List cheaters
+    // List cheaters button
     if (customId === 'list_cheaters') {
       if (cheaters.length === 0) {
         const embed = new EmbedBuilder()
@@ -492,12 +428,12 @@ client.on('interactionCreate', async (interaction) => {
         try {
           await message.edit({ components: [disabledRow] });
         } catch (error) {
-          console.error('ข้อผิดพลาดในการปิดใช้งานปุ่ม:', error.message);
+          console.error('ข้อผิดพลาดในการปิดใช้งานปุ่ม:', error);
         }
       });
     }
 
-    // Remove cheater
+    // Remove cheater button
     if (customId === 'remove_cheater') {
       if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) {
         return interaction.reply({
@@ -514,7 +450,6 @@ client.on('interactionCreate', async (interaction) => {
         .setCustomId('steamid')
         .setLabel('SteamID64 (17 หลัก)')
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder('เช่น 76561198000012345')
         .setRequired(true);
 
       modal.addComponents(new ActionRowBuilder().addComponents(steamIdInput));
@@ -522,7 +457,7 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.showModal(modal);
     }
 
-    // Edit cheater
+    // Edit cheater button
     if (customId === 'edit_cheater') {
       if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) {
         return interaction.reply({
@@ -539,21 +474,18 @@ client.on('interactionCreate', async (interaction) => {
         .setCustomId('steamid')
         .setLabel('SteamID64 (17 หลัก)')
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder('เช่น 76561198000012345')
         .setRequired(true);
 
       const reasonInput = new TextInputBuilder()
         .setCustomId('reason')
         .setLabel('เหตุผลใหม่ (ถ้าต้องการเปลี่ยน)')
         .setStyle(TextInputStyle.Paragraph)
-        .setPlaceholder('เช่น ใช้ Wallhack ในเกม')
         .setRequired(false);
 
       const evidenceInput = new TextInputBuilder()
         .setCustomId('evidence')
         .setLabel('ลิงก์หลักฐานใหม่ (ถ้าต้องการเปลี่ยน)')
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder('เช่น https://youtube.com/watch?v=xxx')
         .setRequired(false);
 
       modal.addComponents(
@@ -621,7 +553,7 @@ client.on('interactionCreate', async (interaction) => {
         .setTimestamp();
 
       await interaction.update({ embeds: [embed], components: [] });
-      await sendToCheaterChannel(embed, [], interaction);
+      await sendToCheaterChannel(embed);
     }
 
     // Confirm remove cheater
@@ -660,7 +592,7 @@ client.on('interactionCreate', async (interaction) => {
         .setTimestamp();
 
       await interaction.update({ embeds: [embed], components: [] });
-      await sendToCheaterChannel(embed, [], interaction);
+      await sendToCheaterChannel(embed);
     }
 
     // Confirm edit cheater
@@ -709,7 +641,7 @@ client.on('interactionCreate', async (interaction) => {
         .setTimestamp();
 
       await interaction.update({ embeds: [embed], components: [] });
-      await sendToCheaterChannel(embed, [], interaction);
+      await sendToCheaterChannel(embed);
     }
 
     // Cancel action
@@ -744,8 +676,8 @@ client.on('interactionCreate', async (interaction) => {
     // Add cheater modal
     if (action === 'add' && type === 'cheater') {
       const steamID = interaction.fields.getTextInputValue('steamid').trim();
-      const reason = interaction.fields.getTextInputValue('reason').trim();
-      let evidence = interaction.fields.getTextInputValue('evidence').trim() || 'ไม่มี';
+      const reason = interaction.fields.getTextInputValue('reason');
+      const evidence = interaction.fields.getTextInputValue('evidence') || 'ไม่มี';
 
       if (!isValidSteamID(steamID)) {
         return interaction.reply({
@@ -761,13 +693,6 @@ client.on('interactionCreate', async (interaction) => {
         });
       }
 
-      if (!isValidEvidence(evidence)) {
-        return interaction.reply({
-          content: 'ลิงก์หลักฐานไม่ถูกต้อง! กรุณาใช้ URL ที่ถูกต้อง เช่น https://youtube.com',
-          flags: MessageFlags.Ephemeral,
-        });
-      }
-
       const confirmEmbed = new EmbedBuilder()
         .setColor('#FF4500')
         .setTitle('🔥 ยืนยันการเพิ่มผู้โกง')
@@ -778,13 +703,13 @@ client.on('interactionCreate', async (interaction) => {
           { name: '📎 หลักฐาน', value: evidence, inline: true },
           { name: '👤 เพิ่มโดย', value: interaction.user.tag, inline: true }
         )
-        .setThumbnail('https://wiki.teamfortress.com/w/images/thumb/4/4a/Team_Fortress_2_Logo.png')
+        .setThumbnail('https://wiki.teamfortress.com/w/images/thumb/4/4a/Team_Fortress_2_Logo.png/250px-Team_Fortress_2_Logo.png')
         .setFooter({ text: 'TF2 Anti-Cheater Bot', iconURL: client.user.displayAvatarURL() })
         .setTimestamp();
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-          .setCustomId(`confirm_add_${userId}_${encodeURIComponent(reason)}`)
+          .setCustomId(`confirm_add_${steamID}_${userId}_${encodeURIComponent(reason)}_${encodeURIComponent(evidence)}`)
           .setLabel('ยืนยัน')
           .setStyle(ButtonStyle.Success),
         new ButtonBuilder()
@@ -818,7 +743,7 @@ client.on('interactionCreate', async (interaction) => {
       const confirmEmbed = new EmbedBuilder()
         .setColor('#FF4500')
         .setTitle('🗑️ ยืนยันการลบผู้โกง')
-        .setDescription('คุณแน่ใจว่าต้องการลบผู้โกงนี้?')
+        .setDescription('คุณแน่ใจหรือไม่ว่าจะลบผู้โกงนี้?')
         .addFields(
           { name: '🆔 SteamID64', value: steamID, inline: true },
           { name: '📝 เหตุผล', value: cheaters[index].reason, inline: true },
@@ -845,8 +770,8 @@ client.on('interactionCreate', async (interaction) => {
     // Edit cheater modal
     if (action === 'edit' && type === 'cheater') {
       const steamID = interaction.fields.getTextInputValue('steamid').trim();
-      const newReason = interaction.fields.getTextInputValue('reason').trim();
-      let newEvidence = interaction.fields.getTextInputValue('evidence').trim();
+      const newReason = interaction.fields.getTextInputValue('reason');
+      const newEvidence = interaction.fields.getTextInputValue('evidence');
 
       if (!isValidSteamID(steamID)) {
         return interaction.reply({
@@ -863,13 +788,6 @@ client.on('interactionCreate', async (interaction) => {
         });
       }
 
-      if (newEvidence && !isValidEvidence(newEvidence)) {
-        return interaction.reply({
-          content: 'ลิงก์หลักฐานใหม่ไม่ถูกต้อง! กรุณาใช้ URL ที่ถูกต้อง เช่น https://youtube.com',
-          flags: MessageFlags.Ephemeral,
-        });
-      }
-
       const confirmEmbed = new EmbedBuilder()
         .setColor('#FFD700')
         .setTitle('✏️ ยืนยันการแก้ไขผู้โกง')
@@ -878,19 +796,15 @@ client.on('interactionCreate', async (interaction) => {
           { name: '🆔 SteamID64', value: steamID, inline: true },
           { name: '📝 เหตุผลใหม่', value: newReason || cheater.reason, inline: true },
           { name: '📎 หลักฐานใหม่', value: newEvidence || cheater.evidence, inline: true },
-          { name: '👤 แก้ไขโดย', value: interaction.user.tag }
+          { name: '👤 แก้ไขโดย', value: interaction.user.tag, inline: true }
         )
-        .setThumbnail('https://wiki.teamfortress.com/w/images/thumb/4/4a/Team_Fortress_2_Logo.png')
+        .setThumbnail('https://wiki.teamfortress.com/w/images/thumb/4/4a/Team_Fortress_2_Logo.png/250px-Team_Fortress_2_Logo.png')
         .setFooter({ text: 'TF2 Anti-Cheater Bot', iconURL: client.user.displayAvatarURL() })
         .setTimestamp();
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-          .setCustomId(
-            `confirm_edit_${steamID}_${userId}_${encodeURIComponent(newReason || cheater.reason)}_${encodeURIComponent(
-              newEvidence || cheater.evidence
-            )}`
-          )
+          .setCustomId(`confirm_edit_${steamID}_${userId}_${encodeURIComponent(newReason || cheater.reason)}_${encodeURIComponent(newEvidence || cheater.evidence)}`)
           .setLabel('ยืนยัน')
           .setStyle(ButtonStyle.Success),
         new ButtonBuilder()
@@ -905,4 +819,4 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 // Log in to Discord
-client.login(process.env.BOT_TOKEN);
+client.login('YOUR_BOT_TOKEN'); // แทนที่ด้วยโทเค็นของบอท
